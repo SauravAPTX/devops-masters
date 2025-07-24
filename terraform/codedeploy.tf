@@ -10,7 +10,7 @@ resource "aws_codedeploy_deployment_group" "deployment_group" {
   deployment_group_name = "${var.project_name}-deployment-group"
   service_role_arn      = aws_iam_role.codedeploy_role.arn
 
-  deployment_config_name = "CodeDeployDefault.AllAtOneCodeDeployment"
+  deployment_config_name = "CodeDeployDefault.AllAtOnce"
 
   ec2_tag_filter {
     key   = "Environment"
@@ -26,7 +26,7 @@ resource "aws_codedeploy_deployment_group" "deployment_group" {
 
 # Example EC2 instance for deployment
 resource "aws_instance" "app_server" {
-  ami                    = "ami-0c02fb55956c7d316" # Amazon Linux 2
+  ami                    = "ami-0f58b397bc5c1f2e8" # Amazon Linux 2
   instance_type          = "t3.micro"
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
   vpc_security_group_ids = [aws_security_group.app_sg.id]

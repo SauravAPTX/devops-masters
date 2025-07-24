@@ -15,11 +15,6 @@ variable "github_repo" {
   type        = string
 }
 
-variable "github_token" {
-  description = "GitHub personal access token"
-  type        = string
-  sensitive   = true
-}
 
 variable "environment" {
   description = "Environment name"

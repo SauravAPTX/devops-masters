@@ -8,24 +8,24 @@ resource "aws_codepipeline" "pipeline" {
   }
 
   stage {
-    name = "Source"
+  name = "Source"
 
-    action {
-      name             = "Source"
-      category         = "Source"
-      owner            = "ThirdParty"
-      provider         = "GitHub"
-      version          = "1"
-      output_artifacts = ["source_output"]
+  action {
+    name             = "Source"
+    category         = "Source"
+    owner            = "AWS"
+    provider         = "CodeStarSourceConnection"
+    version          = "1"
+    output_artifacts = ["source_output"]
 
-      configuration = {
-        Owner      = split("/", var.github_repo)[0]
-        Repo       = split("/", var.github_repo)[1]
-        Branch     = "main"
-        OAuthToken = var.github_token
-      }
+    configuration = {
+      ConnectionArn        = "arn:aws:codestar-connections:ap-south-1:123456789012:connection/abcd1234-ef56-7890-ghij-klmnopqrstuv"
+      FullRepositoryId     = var.github_repo       # e.g., "sauravmohanty/devops-masters-2025"
+      BranchName           = "main"
+      OutputArtifactFormat = "CODE_ZIP"
     }
   }
+}
 
   stage {
     name = "Build"
