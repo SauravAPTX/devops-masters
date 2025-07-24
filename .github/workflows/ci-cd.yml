@@ -1,14 +1,14 @@
 name: DevSecOps CI/CD Pipeline
 
+permissions:
+  contents: read
+  security-events: write
+
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main]
-
-permissions:
-  contents: read
-  security-events: write
 
 env:
   AWS_REGION: us-east-1
@@ -49,11 +49,13 @@ jobs:
       - name: List Docker images
         run: docker images
 
-      - name: Install Trivy
+      - name: Install Trivy (latest from repo)
         run: |
           sudo apt-get install wget -y
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
-          sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy -y
 
       - name: Run Trivy vulnerability scanner and output SARIF
         run: |
