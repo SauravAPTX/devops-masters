@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: read
-  security-events: write
-
 env:
   AWS_REGION: ap-south-1
   CLUSTER_NAME: devops-cluster
@@ -30,7 +26,7 @@ jobs:
 
       - name: Install tfsec
         run: |
-          wget https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -O tfsec
+          curl -sL https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o tfsec
           chmod +x tfsec
           sudo mv tfsec /usr/local/bin/
 
@@ -45,14 +41,19 @@ jobs:
           sarif_file: tfsec.sarif
 
       - name: Build Docker image for scanning
-        run: docker build -t test-app:${{ github.sha }} ./app
+        run: |
+          docker build -t test-app:${{ github.sha }} ./app
+
+      - name: List Docker images
+        run: docker images
 
       - name: Install Trivy
         run: |
+          sudo apt-get install wget gnupg lsb-release -y
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/trivy.list
           sudo apt-get update -y
-          sudo apt-get install wget -y
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
-          sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
+          sudo apt-get install trivy -y
 
       - name: Run Trivy vulnerability scanner and output SARIF
         run: |
@@ -61,7 +62,7 @@ jobs:
       - name: Check Trivy SARIF exists
         run: |
           if [ ! -f trivy-results.sarif ]; then
-            echo "❌ Trivy SARIF report not found!"
+            echo "❌ Trivy report not found!"
             exit 1
           fi
 
