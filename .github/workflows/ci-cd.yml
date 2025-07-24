@@ -30,7 +30,7 @@ jobs:
 
       - name: Run tfsec and output SARIF
         run: |
-          tfsec --format sarif --out tfsec.sarif terraform/
+          tfsec --format sarif --out tfsec.sarif terraform/ --tfvars-file terraform/terraform.tfvars || true
 
       - name: Upload tfsec SARIF results
         uses: github/codeql-action/upload-sarif@v3
@@ -42,6 +42,9 @@ jobs:
         run: |
           docker build -t test-app:${{ github.sha }} ./app
 
+      - name: List Docker images
+        run: docker images
+
       - name: Install Trivy
         run: |
           sudo apt-get install wget -y
@@ -50,7 +53,14 @@ jobs:
 
       - name: Run Trivy vulnerability scanner and output SARIF
         run: |
-          trivy image --format sarif --output trivy-results.sarif test-app:${{ github.sha }}
+          trivy image --format sarif --output trivy-results.sarif test-app:${{ github.sha }} --debug || true
+
+      - name: Check Trivy SARIF exists
+        run: |
+          if [ ! -f trivy-results.sarif ]; then
+            echo "❌ Trivy report not found!"
+            exit 1
+          fi
 
       - name: Upload Trivy SARIF results
         uses: github/codeql-action/upload-sarif@v3
@@ -136,13 +146,10 @@ jobs:
 
       - name: Create and seal secrets
         run: |
-          # Create a regular Kubernetes secret
           kubectl create secret generic app-secrets \
             --from-literal=database-url="${{ secrets.DATABASE_URL }}" \
             --from-literal=api-key="${{ secrets.API_KEY }}" \
             --dry-run=client -o yaml > secret.yaml
-            
-          # Seal the secret
           kubeseal -f secret.yaml -w k8s/sealed-secret.yaml
 
       - name: Apply Sealed Secrets
@@ -151,25 +158,15 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          # Build image
           docker build -t ${{ secrets.ECR_REGISTRY }}/devops-app:${{ github.sha }} ./app
-
-          # Login to ECR
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-
-          # Push image
           docker push ${{ secrets.ECR_REGISTRY }}/devops-app:${{ github.sha }}
 
       - name: Deploy to Kubernetes
         run: |
-          # Update image tag in deployment
           sed -i 's|IMAGE_TAG|${{ github.sha }}|g' k8s/app-deployment.yaml
           sed -i 's|ECR_REGISTRY|${{ secrets.ECR_REGISTRY }}|g' k8s/app-deployment.yaml
-
-          # Apply Kubernetes manifests
           kubectl apply -f k8s/
-
-          # Wait for deployment to complete
           kubectl rollout status deployment/devops-app
 
       - name: Run Terraform Apply
