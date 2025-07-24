@@ -24,14 +24,15 @@ jobs:
         with:
           terraform_version: 1.5.0
 
-      - name: Terraform Security Scan with tfsec
-        uses: aquasecurity/tfsec-action@v1.0.3
-        with:
-          working_directory: terraform
-          format: sarif
-          soft_fail: true
+      - name: Install tfsec
+        run: |
+          curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
 
-      - name: Upload tfsec results to GitHub Security
+      - name: Run tfsec and output SARIF
+        run: |
+          tfsec --format sarif --out tfsec.sarif terraform/
+
+      - name: Upload tfsec SARIF results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -41,18 +42,21 @@ jobs:
         run: |
           docker build -t test-app:${{ github.sha }} ./app
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: "test-app:${{ github.sha }}"
-          format: "sarif"
-          output: "trivy-results.sarif"
+      - name: Install Trivy
+        run: |
+          sudo apt-get install wget -y
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
+          sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
 
-      - name: Upload Trivy scan results to GitHub Security
+      - name: Run Trivy vulnerability scanner and output SARIF
+        run: |
+          trivy image --format sarif --output trivy-results.sarif test-app:${{ github.sha }}
+
+      - name: Upload Trivy SARIF results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: "trivy-results.sarif"
+          sarif_file: trivy-results.sarif
 
   terraform-plan:
     name: Terraform Plan
