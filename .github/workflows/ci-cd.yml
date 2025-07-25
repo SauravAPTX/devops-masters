@@ -164,10 +164,13 @@ jobs:
         run: |
           kubectl apply -f k8s/sealed-secret.yaml
 
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+
       - name: Build and push Docker image
         run: |
           docker build -t ${{ secrets.ECR_REGISTRY }}/devops-app:${{ github.sha }} ./app
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
           docker push ${{ secrets.ECR_REGISTRY }}/devops-app:${{ github.sha }}
 
       - name: Deploy to Kubernetes
