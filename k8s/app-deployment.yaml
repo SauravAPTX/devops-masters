@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: devops-app
-          image: ECR_REGISTRY/devops-app:IMAGE_TAG
+          image: 237206024543.dkr.ecr.ap-south-1.amazonaws.com/devops-app:IMAGE_TAG
           ports:
             - containerPort: 8080
           env:

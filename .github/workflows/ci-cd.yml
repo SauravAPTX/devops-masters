@@ -12,7 +12,7 @@ permissions:
 
 env:
   AWS_REGION: ap-south-1
-  CLUSTER_NAME: devops-cluster
+  CLUSTER_NAME: devops-masters-cluster
 
 jobs:
   security-scan:

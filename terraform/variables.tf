@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
+  default     = "ap-south-1"
 }
 
 variable "project_name" {
@@ -20,4 +20,19 @@ variable "environment" {
   description = "Environment name"
   type        = string
   default     = "dev"
+}
+variable "subnet_ids" {
+  type        = list(string)
+  description = "List of subnet IDs for the EKS cluster"
+}
+variable "ecr_registry" {
+  description = "ECR registry URL"
+  type        = string
+  default     = ""
+}
+
+variable "vpc_id" {
+  description = "VPC ID for resources"
+  type        = string
+  default     = ""
 }
