@@ -13,7 +13,7 @@ func TestTerraformInfrastructure(t *testing.T) {
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
 		TerraformDir: "../terraform",
 		Vars: map[string]interface{}{
-			"aws_region":    "us-east-1",
+			"aws_region":    "ap-south-1",
 			"project_name":  "devops-masters-test",
 			"github_repo":   "your-username/your-repo",
 			"github_token":  "your-github-token",
@@ -42,7 +42,7 @@ func TestS3BucketConfiguration(t *testing.T) {
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
 		TerraformDir: "../terraform",
 		Vars: map[string]interface{}{
-			"aws_region":    "us-east-1",
+			"aws_region":    "ap-south-1",
 			"project_name":  "devops-masters-s3-test",
 			"github_repo":   "your-username/your-repo",
 			"github_token":  "your-github-token",
