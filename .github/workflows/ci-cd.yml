@@ -171,7 +171,7 @@ jobs:
       - name: Build and push Docker image
         run: |
           docker build -t ${{ secrets.ECR_REGISTRY }}/devops-app:${{ github.sha }} ./app
-          docker push ${{ secrets.ECR_REGISTRY }}:${{ github.sha }}
+          docker push ${{ secrets.ECR_REGISTRY }}/devops-app:${{ github.sha }}
 
       - name: Deploy to Kubernetes
         run: |
