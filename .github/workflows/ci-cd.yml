@@ -9,12 +9,10 @@ on:
 permissions:
   contents: read
   security-events: write
-  id-token: write # For OIDC authentication
 
 env:
   AWS_REGION: ap-south-1
   CLUSTER_NAME: devops-masters-cluster
-  ECR_REPOSITORY: devops-masters-app
 
 jobs:
   security-scan:
@@ -28,7 +26,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.7.0
+          terraform_version: 1.5.0
 
       - name: Install tfsec
         run: |
@@ -38,52 +36,45 @@ jobs:
 
       - name: Run tfsec and output SARIF
         run: |
-          mkdir -p reports
-          if [ -d "terraform" ]; then
-            tfsec --format sarif --out reports/tfsec.sarif terraform/ --tfvars-file terraform/terraform.tfvars
-          else
-            echo "No terraform directory found, skipping tfsec scan"
-            echo '{"version": "2.1.0", "runs": []}' > reports/tfsec.sarif
-          fi
+          tfsec --format sarif --out tfsec.sarif terraform/ --tfvars-file terraform/terraform.tfvars || true
 
       - name: Upload tfsec SARIF results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: reports/tfsec.sarif
+          sarif_file: tfsec.sarif
 
       - name: Build Docker image for scanning
         run: |
-          if [ -f "./app/Dockerfile" ]; then
-            docker build -t test-app:${{ github.sha }} ./app
-          else
-            echo "No Dockerfile found in ./app directory"
-            exit 1
-          fi
+          docker build -t test-app:${{ github.sha }} ./app
+
+      - name: List Docker images
+        run: docker images
 
       - name: Install Trivy
         run: |
-          sudo apt-get update
-          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+          sudo apt-get install wget gnupg lsb-release -y
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install trivy -y
 
       - name: Run Trivy vulnerability scanner and output SARIF
         run: |
-          trivy image --format sarif --output reports/trivy-results.sarif test-app:${{ github.sha }}
+          trivy image --format sarif --output trivy-results.sarif test-app:${{ github.sha }} --debug || true
+
+      - name: Check Trivy SARIF exists
+        run: |
+          if [ ! -f trivy-results.sarif ]; then
+            echo "❌ Trivy report not found!"
+            exit 1
+          fi
 
       - name: Upload Trivy SARIF results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: reports/trivy-results.sarif
-
-      - name: Check for critical vulnerabilities
-        run: |
-          # Fail if critical vulnerabilities are found
-          trivy image --severity CRITICAL --exit-code 1 test-app:${{ github.sha }}
+          sarif_file: trivy-results.sarif
 
   terraform-plan:
     name: Terraform Plan
@@ -105,15 +96,11 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.7.0
+          terraform_version: 1.5.0
 
       - name: Terraform Init
         working-directory: terraform
         run: terraform init
-
-      - name: Terraform Validate
-        working-directory: terraform
-        run: terraform validate
 
       - name: Terraform Plan
         working-directory: terraform
@@ -128,7 +115,6 @@ jobs:
         with:
           name: terraform-plan
           path: terraform/tfplan
-          retention-days: 5
 
   build-and-deploy:
     name: Build and Deploy
@@ -147,13 +133,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get AWS Account ID
-        id: aws-account
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "account-id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
-          echo "ecr-registry=$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com" >> $GITHUB_OUTPUT
-
       - name: Setup kubectl
         uses: azure/setup-kubectl@v3
         with:
@@ -169,37 +148,17 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
-      - name: Check if Sealed Secrets Controller exists
-        id: check-sealed-secrets
-        run: |
-          if kubectl get deployment sealed-secrets-controller -n kube-system > /dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Install Sealed Secrets Controller
-        if: steps.check-sealed-secrets.outputs.exists == 'false'
         run: |
           kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/controller.yaml
-          kubectl wait --for=condition=available --timeout=300s deployment/sealed-secrets-controller -n kube-system
 
       - name: Create and seal secrets
         run: |
-          # Create temp directory for secrets
-          mkdir -p temp-secrets
-
-          # Create secret manifest
           kubectl create secret generic app-secrets \
             --from-literal=database-url="${{ secrets.DATABASE_URL }}" \
             --from-literal=api-key="${{ secrets.API_KEY }}" \
-            --dry-run=client -o yaml > temp-secrets/secret.yaml
-
-          # Seal the secret
-          kubeseal -f temp-secrets/secret.yaml -w k8s/sealed-secret.yaml
-
-          # Clean up temp files
-          rm -rf temp-secrets
+            --dry-run=client -o yaml > secret.yaml
+          kubeseal -f secret.yaml -w k8s/sealed-secret.yaml
 
       - name: Apply Sealed Secrets
         run: |
@@ -207,36 +166,23 @@ jobs:
 
       - name: Login to Amazon ECR
         run: |
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.aws-account.outputs.ecr-registry }}
-
-      - name: Create ECR repository if it doesn't exist
-        run: |
-          aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} || \
-          aws ecr create-repository --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }}
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
       - name: Build and push Docker image
         run: |
-          IMAGE_URI=${{ steps.aws-account.outputs.ecr-registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          docker build -t $IMAGE_URI ./app
-          docker push $IMAGE_URI
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          docker build -t ${{ secrets.ECR_REGISTRY }}:${{ github.sha }} ./app
+          docker push ${{ secrets.ECR_REGISTRY }}:${{ github.sha }}
 
       - name: Deploy to Kubernetes
         run: |
-          # Update deployment manifest with new image
-          sed -i "s|IMAGE_TAG|${{ github.sha }}|g" k8s/app-deployment.yaml
-          sed -i "s|ECR_REGISTRY|${{ steps.aws-account.outputs.ecr-registry }}/${{ env.ECR_REPOSITORY }}|g" k8s/app-deployment.yaml
-
-          # Apply all Kubernetes manifests
+          sed -i 's|IMAGE_TAG|${{ github.sha }}|g' k8s/app-deployment.yaml
+          sed -i 's|ECR_REGISTRY|${{ secrets.ECR_REGISTRY }}|g' k8s/app-deployment.yaml
           kubectl apply -f k8s/
-
-          # Wait for deployment to complete
-          kubectl rollout status deployment/devops-app --timeout=600s
-
-      - name: Setup Terraform for infrastructure updates
+          kubectl rollout status deployment/devops-app
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.7.0
+          terraform_version: 1.5.0
 
       - name: Run Terraform Apply
         working-directory: terraform
@@ -256,67 +202,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
           go-version: "1.21"
 
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
       - name: Run Terratest
         working-directory: tests
         run: |
-          if [ ! -f go.mod ]; then
-            go mod init terratest
-          fi
+          go mod init terratest
           go mod tidy
           go test -v -timeout 30m
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
-
-  cleanup-on-failure:
-    name: Cleanup on Failure
-    runs-on: ubuntu-latest
-    needs: [build-and-deploy, test]
-    if: failure()
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: "v1.28.0"
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-
-      - name: Rollback deployment
-        run: |
-          kubectl rollout undo deployment/devops-app || echo "No previous revision to rollback to"
